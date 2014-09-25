@@ -1,19 +1,26 @@
 #include "taskimpl.h"
-#include <sys/poll.h>
 #include <fcntl.h>
 
-enum
-{
-	MAXFD = 1024
-};
+#define MAXFD  10240
 
-static struct pollfd pollfd[MAXFD];
+
 static Task *polltask[MAXFD];
-static int npollfd;
-static int startedfdtask;
 static Tasklist sleeping;
 static int sleepingcounted;
+static int startedfdtask;
+
 static uvlong nsec(void);
+
+/*
+ * can not use linux's epoll
+ */
+#ifndef __linux__
+
+#include <sys/poll.h>
+
+static struct pollfd pollfd[MAXFD];
+static int npollfd;
+
 
 void
 fdtask(void *v)
@@ -70,6 +77,170 @@ fdtask(void *v)
 	}
 }
 
+void
+fdwait(int fd, int rw)
+{
+	int bits;
+
+	if(!startedfdtask){
+		startedfdtask = 1;
+		taskcreate(fdtask, 0, 32768);
+	}
+
+	if(npollfd >= MAXFD){
+		fprint(2, "too many poll file descriptors\n");
+		abort();
+	}
+	
+	taskstate("fdwait for %s", rw=='r' ? "read" : rw=='w' ? "write" : "error");
+	bits = 0;
+	switch(rw){
+	case 'r':
+		bits |= POLLIN;
+		break;
+	case 'w':
+		bits |= POLLOUT;
+		break;
+	}
+
+	polltask[npollfd] = taskrunning;
+	pollfd[npollfd].fd = fd;
+	pollfd[npollfd].events = bits;
+	pollfd[npollfd].revents = 0;
+	npollfd++;
+	taskswitch();
+}
+
+#else
+
+#include <sys/epoll.h>
+
+struct epollfd_context {
+	int bits;
+	int set;
+};
+
+static int epfd;
+static struct epoll_fd_context pollfd[MAXFD];
+
+void
+fdtask(void *v)
+{
+	int i, ms;
+	Task *t;
+	uvlong now;
+	struct epoll_event events[MAXFD];
+	int nevents;
+
+	tasksystem();
+	taskname("fdtask");
+	for(;;) {
+		/* let everyone else run */
+		while(taskyield() > 0)
+			;
+		/* we're the only one runnable - poll for i/o */
+		errno = 0;
+		taskstate("epoll");
+		if ((t=sleeping.head) == nil)
+			ms = -1;
+		else {
+			/* sleep at most 5s */
+			now = nsec();
+			if(now >= t->alarmtime)
+				ms = 0;
+			else if (now+5*1000*1000*1000LL >= t->alarmtime)
+				ms = (t->alarmtime - now)/1000000;
+			else
+				ms = 5000;
+		}
+
+		nevents = epoll_wait(epfd, events, MAXFD, ms);
+		if(nevents < 0) {
+			if(errno == EINTR)
+				continue;
+			fprint(2, "epoll: %s\n", strerror(errno));
+			taskexitall(0);
+		}
+
+		/* wake up the guys who deserve it */
+		for (i = 0; i < nevents; i++) {
+			taskready((Task *)events[i].data.ptr);
+		}
+
+		now = nsec();
+		while((t=sleeping.head) && now >= t->alarmtime){
+			deltask(&sleeping, t);
+			if(!t->system && --sleepingcounted == 0)
+				taskcount--;
+			taskready(t);
+		}
+	}
+}
+
+void
+fdwait(int fd, int rw)
+{
+	int bits;
+	int op;
+	struct epollfd_context *ctx;
+	struct epoll_event ev = {0};
+	int ret;
+
+	if(!startedfdtask) {
+		startedfdtask = 1;
+
+		epfd = epoll_create(1); // create epoll
+		if (epfd <= 0) {
+			fprint(2, "can not create epoll descriptor\n");
+			abort();
+		}
+
+		memset(pollfd, 0, sizeof(pollfd)); // set all context to zero
+		taskcreate(fdtask, 0, 32768);
+	}
+
+	if(fd >= MAXFD) {
+		fprint(2, "too many poll file descriptors\n");
+		abort();
+	}
+
+	taskstate("fdwait for %s", rw=='r' ? "read" : rw=='w' ? "write" : "error");
+
+	ctx = &pollfd[fd];
+	if (!ctx->set) {
+		op = EPOLL_CTL_ADD;
+	} else {
+		op = EPOLL_CTL_MOD;
+	}
+
+	bits = ctx->bits;
+	switch(rw) {
+	case 'r':
+		bits |= EPOLLIN | EPOLLPRI;
+		break;
+	case 'w':
+		bits |= EPOLLOUT;
+		break;
+	}
+
+	ev.data.ptr = taskrunning;
+	ev.events = bits;
+
+	ret = epoll_ctl(epfd, op, fd, &ev);
+	if (ret) {
+		return;
+	}
+
+	// set context
+	ctx->bits = bits;
+	ctx->set = 1;
+
+	taskswitch();
+}
+
+#endif
+
+
 uint
 taskdelay(uint ms)
 {
@@ -110,40 +281,6 @@ taskdelay(uint ms)
 	taskswitch();
 
 	return (nsec() - now)/1000000;
-}
-
-void
-fdwait(int fd, int rw)
-{
-	int bits;
-
-	if(!startedfdtask){
-		startedfdtask = 1;
-		taskcreate(fdtask, 0, 32768);
-	}
-
-	if(npollfd >= MAXFD){
-		fprint(2, "too many poll file descriptors\n");
-		abort();
-	}
-	
-	taskstate("fdwait for %s", rw=='r' ? "read" : rw=='w' ? "write" : "error");
-	bits = 0;
-	switch(rw){
-	case 'r':
-		bits |= POLLIN;
-		break;
-	case 'w':
-		bits |= POLLOUT;
-		break;
-	}
-
-	polltask[npollfd] = taskrunning;
-	pollfd[npollfd].fd = fd;
-	pollfd[npollfd].events = bits;
-	pollfd[npollfd].revents = 0;
-	npollfd++;
-	taskswitch();
 }
 
 /* Like fdread but always calls fdwait before reading. */
