@@ -3,21 +3,24 @@
 
 #define MAXFD  10240
 
-
-static Task *polltask[MAXFD];
 static Tasklist sleeping;
 static int sleepingcounted;
 static int startedfdtask;
 
 static uvlong nsec(void);
 
+#ifdef __linux__
+#define USE_EPOLL 1
+#endif
+
 /*
  * can not using linux's epoll
  */
-#ifndef __linux__
+#ifndef USE_EPOLL
 
 #include <sys/poll.h>
 
+static Task *polltask[MAXFD];
 static struct pollfd pollfd[MAXFD];
 static int npollfd;
 
@@ -122,7 +125,8 @@ struct epollfd_context {
 };
 
 static int epfd;
-static struct epoll_fd_context pollfd[MAXFD];
+static struct epollfd_context pollfd[MAXFD];
+static struct epoll_event events[MAXFD];
 
 void
 fdtask(void *v)
@@ -130,7 +134,6 @@ fdtask(void *v)
 	int i, ms;
 	Task *t;
 	uvlong now;
-	struct epoll_event events[MAXFD];
 	struct epoll_event ev;
 	struct epollfd_context *ctx;
 	int nevents;
@@ -201,7 +204,7 @@ fdwait(int fd, int rw)
 	struct epoll_event ev = {0};
 	int ret;
 
-	if(!startedfdtask) {
+	if (!startedfdtask) {
 		startedfdtask = 1;
 
 		epfd = epoll_create(1); // create epoll
@@ -211,6 +214,7 @@ fdwait(int fd, int rw)
 		}
 
 		memset(pollfd, 0, sizeof(pollfd)); // set all context to zero
+
 		taskcreate(fdtask, 0, 32768);
 	}
 
@@ -265,12 +269,13 @@ taskdelay(uint ms)
 	
 	if(!startedfdtask){
 		startedfdtask = 1;
-#ifdef __linux__
+#ifdef USE_EPOLL
         epfd = epoll_create(1);
         if (epfd < 0) {
         	fprint(2, "can not create epoll descriptor\n");
 			abort();
         }
+        memset(pollfd, 0, sizeof(pollfd)); // set all context to zero
 #endif
 		taskcreate(fdtask, 0, 32768);
 	}
