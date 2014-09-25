@@ -174,11 +174,11 @@ fdtask(void *v)
 		for (i = 0; i < nevents; i++) {
 			ctx = &pollfd[events[i].data.fd];
 
-			taskready(ctx->task);
-
 			// delete fd from epoll success
 			// set context's task, bits and set to zero
 			if (0 == epoll_ctl(epfd, EPOLL_CTL_DEL, events[i].data.fd, &ev)) {
+				taskready(ctx->task); // wakeup task
+
 				ctx->task = NULL;
 				ctx->bits = 0;
 				ctx->set = 0;
@@ -228,7 +228,7 @@ fdwait(int fd, int rw)
 	ctx = &pollfd[fd];
 	if (!ctx->set) {
 		op = EPOLL_CTL_ADD;
-	} else { // if EPOLL_CTL_DEL operation was failed, then this result occur
+	} else { // never occur 
 		op = EPOLL_CTL_MOD;
 	}
 
