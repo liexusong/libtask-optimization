@@ -66,11 +66,9 @@ taskstart(uint y, uint x)
 	z |= y;
 	t = (Task*)z;
 
-//print("taskstart %p\n", t);
 	t->startfn(t->startarg);
-//print("taskexits %p\n", t);
+
 	taskexit(0);
-//print("not reacehd\n");
 }
 
 static int taskidgen;
@@ -123,11 +121,12 @@ taskalloc(void (*fn)(void*), void *arg, uint stack)
 	 * function that takes some number of word-sized variables,
 	 * and on 64-bit machines pointers are bigger than words.
 	 */
-//print("make %p\n", t);
+
 	z = (ulong)t;
 	y = z;
 	z >>= 16;	/* hide undefined 32-bit shift from 32-bit compilers */
 	x = z>>16;
+
 	makecontext(&t->context.uc, (void(*)())taskstart, 2, y, x);
 
 	return t;
@@ -234,13 +233,17 @@ taskscheduler(void)
 			fprint(2, "no runnable tasks! %d tasks stalled\n", taskcount);
 			exit(1);
 		}
+
 		deltask(&taskrunqueue, t);
+
 		t->ready = 0;
 		taskrunning = t;
 		tasknswitch++;
+
 		taskdebug("run %d (%s)", t->id, t->name);
+
 		contextswitch(&taskschedcontext, &t->context);
-//print("back in scheduler\n");
+
 		taskrunning = nil;
 		if(t->exiting){
 			if(!t->system)
