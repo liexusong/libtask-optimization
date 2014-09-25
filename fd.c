@@ -12,7 +12,7 @@ static int startedfdtask;
 static uvlong nsec(void);
 
 /*
- * can not use linux's epoll
+ * can not using linux's epoll
  */
 #ifndef __linux__
 
@@ -111,11 +111,12 @@ fdwait(int fd, int rw)
 	taskswitch();
 }
 
-#else
+#else  /* using epoll interface */
 
 #include <sys/epoll.h>
 
 struct epollfd_context {
+	Task *task;
 	int bits;
 	int set;
 };
@@ -130,17 +131,21 @@ fdtask(void *v)
 	Task *t;
 	uvlong now;
 	struct epoll_event events[MAXFD];
+	struct epoll_event ev;
+	struct epollfd_context *ctx;
 	int nevents;
 
 	tasksystem();
 	taskname("fdtask");
-	for(;;) {
+
+	for (;;) {
 		/* let everyone else run */
 		while(taskyield() > 0)
 			;
 		/* we're the only one runnable - poll for i/o */
 		errno = 0;
 		taskstate("epoll");
+
 		if ((t=sleeping.head) == nil)
 			ms = -1;
 		else {
@@ -164,11 +169,21 @@ fdtask(void *v)
 
 		/* wake up the guys who deserve it */
 		for (i = 0; i < nevents; i++) {
-			taskready((Task *)events[i].data.ptr);
+			ctx = &pollfd[events[i].data.fd];
+
+			taskready(ctx->task);
+
+			// delete fd from epoll success
+			// set context's task, bits and set to zero
+			if (0 == epoll_ctl(epfd, EPOLL_CTL_DEL, events[i].data.fd, &ev)) {
+				ctx->task = NULL;
+				ctx->bits = 0;
+				ctx->set = 0;
+			}
 		}
 
 		now = nsec();
-		while((t=sleeping.head) && now >= t->alarmtime){
+		while((t=sleeping.head) && now >= t->alarmtime) {
 			deltask(&sleeping, t);
 			if(!t->system && --sleepingcounted == 0)
 				taskcount--;
@@ -190,7 +205,7 @@ fdwait(int fd, int rw)
 		startedfdtask = 1;
 
 		epfd = epoll_create(1); // create epoll
-		if (epfd <= 0) {
+		if (epfd < 0) {
 			fprint(2, "can not create epoll descriptor\n");
 			abort();
 		}
@@ -209,7 +224,7 @@ fdwait(int fd, int rw)
 	ctx = &pollfd[fd];
 	if (!ctx->set) {
 		op = EPOLL_CTL_ADD;
-	} else {
+	} else { // if EPOLL_CTL_DEL operation was failed, then this result occur
 		op = EPOLL_CTL_MOD;
 	}
 
@@ -223,15 +238,16 @@ fdwait(int fd, int rw)
 		break;
 	}
 
-	ev.data.ptr = taskrunning;
+	ev.data.fd = fd;
 	ev.events = bits;
 
 	ret = epoll_ctl(epfd, op, fd, &ev);
-	if (ret) {
+	if (ret < 0) {
 		return;
 	}
 
 	// set context
+	ctx->task = taskrunning;
 	ctx->bits = bits;
 	ctx->set = 1;
 
@@ -249,6 +265,13 @@ taskdelay(uint ms)
 	
 	if(!startedfdtask){
 		startedfdtask = 1;
+#ifdef __linux__
+        epfd = epoll_create(1);
+        if (epfd < 0) {
+        	fprint(2, "can not create epoll descriptor\n");
+			abort();
+        }
+#endif
 		taskcreate(fdtask, 0, 32768);
 	}
 
