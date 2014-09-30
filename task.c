@@ -225,7 +225,8 @@ taskscheduler(void)
 	Task *t;
 
 	taskdebug("scheduler enter");
-	for(;;){
+
+	for(;;) {
 		if(taskcount == 0)
 			exit(taskexitval);
 		t = taskrunqueue.head;
@@ -245,7 +246,7 @@ taskscheduler(void)
 		contextswitch(&taskschedcontext, &t->context);
 
 		taskrunning = nil;
-		if(t->exiting){
+		if(t->exiting) {
 			if(!t->system)
 				taskcount--;
 			i = t->alltaskslot;
@@ -369,6 +370,8 @@ main(int argc, char **argv)
 	argv0 = argv[0];
 	taskargc = argc;
 	taskargv = argv;
+
+	io_init(0);
 
 	if(mainstacksize == 0)
 		mainstacksize = 256*1024;
