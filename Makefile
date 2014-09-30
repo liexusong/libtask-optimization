@@ -20,7 +20,7 @@ $(OFILES): taskimpl.h task.h 386-ucontext.h power-ucontext.h
 
 AS=gcc -c
 CC=gcc
-CFLAGS=-Wall -c -I. -ggdb
+CFLAGS=-Wall -c -I. -ggdb -lpthread
 
 %.o: %.S
 	$(AS) $*.S
@@ -32,19 +32,19 @@ $(LIB): $(OFILES)
 	ar rvc $(LIB) $(OFILES)
 
 primes: primes.o $(LIB)
-	$(CC) -o primes primes.o $(LIB)
+	$(CC) -o primes primes.o $(LIB) -lpthread
 
 tcpproxy: tcpproxy.o $(LIB)
-	$(CC) -o tcpproxy tcpproxy.o $(LIB) $(TCPLIBS)
+	$(CC) -o tcpproxy tcpproxy.o $(LIB) $(TCPLIBS) -lpthread
 
 httpload: httpload.o $(LIB)
-	$(CC) -o httpload httpload.o $(LIB)
+	$(CC) -o httpload httpload.o $(LIB) -lpthread
 
 testdelay: testdelay.o $(LIB)
-	$(CC) -o testdelay testdelay.o $(LIB)
+	$(CC) -o testdelay testdelay.o $(LIB) -lpthread
 
 testdelay1: testdelay1.o $(LIB)
-	$(CC) -o testdelay1 testdelay1.o $(LIB)
+	$(CC) -o testdelay1 testdelay1.o $(LIB) -lpthread
 
 clean:
 	rm -f *.o primes tcpproxy testdelay testdelay1 httpload $(LIB)

@@ -181,7 +181,6 @@ int		netdial(int, char*, int);
 
 int io_read(int fd, char *buf, size_t size);
 int io_write(int fd, char *buf, size_t size);
-void io_getready();
 int io_init(int io_threads);
 
 #ifdef __cplusplus

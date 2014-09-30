@@ -371,7 +371,10 @@ main(int argc, char **argv)
 	taskargc = argc;
 	taskargv = argv;
 
-	io_init(0);
+	if (io_init(0) == -1) {
+	    fprintf(2, "error in initialize I/O context!\n");
+	    exit(-1);
+	}
 
 	if(mainstacksize == 0)
 		mainstacksize = 256*1024;
